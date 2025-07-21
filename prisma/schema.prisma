@@ -1,0 +1,546 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+enum UserRole {
+  STUDENT
+  TEACHER
+  ADMIN
+  PARENT
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  PAUSED
+  DROPPED
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum AssignmentType {
+  QUIZ
+  HOMEWORK
+  PROJECT
+  MIDTERM
+  FINAL
+  DISCUSSION
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  GRADED
+  LATE
+}
+
+enum ProctoringStatus {
+  NOT_REQUIRED
+  REQUIRED
+  SCHEDULED
+  COMPLETED
+  FAILED
+}
+
+enum PaymentPlanType {
+  FULL_PAYMENT
+  MONTHLY
+  SEMESTER
+  COURSE_BY_COURSE
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  name            String?
+  hashedPassword  String
+  role            UserRole  @default(STUDENT)
+  dateOfBirth     DateTime?
+  phone           String?
+  address         String?
+  emergencyContact String?
+  emergencyPhone  String?
+  
+  // Academic Information
+  gradeLevel      Int?      // 9-12 for high school
+  graduationYear  Int?
+  gpa             Float?    @default(0.0)
+  totalCredits    Int       @default(0)
+  
+  // Parent/Guardian relationship
+  parentId        String?
+  parent          User?     @relation("ParentChild", fields: [parentId], references: [id])
+  children        User[]    @relation("ParentChild")
+  
+  // Stripe integration
+  stripeCustomerId String?
+  
+  // Compliance and verification
+  isVerified      Boolean   @default(false)
+  verificationDocuments String? // JSON array of document URLs
+  consentGiven    Boolean   @default(false)
+  consentDate     DateTime?
+  
+  // Relationships
+  enrollments     Enrollment[]
+  progress        Progress[]
+  chatHistory     ChatMessage[]
+  submissions     Submission[]
+  payments        Payment[]
+  transcripts     Transcript[]
+  announcements   Announcement[]
+  messages        Message[]
+  todos           Todo[]
+  proctoringSessions ProctoringSession[]
+  paymentPlans    PaymentPlan[]
+  attendance      Attendance[]
+  notifications   Notification[]
+  teachingCourses CourseTeacher[]
+  
+  // Timestamps
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  
+  @@index([role])
+  @@index([gradeLevel])
+}
+
+model Course {
+  id          String    @id @default(cuid())
+  title       String
+  description String
+  subject     String    // Math, Science, English, History, etc.
+  credits     Int
+  gradeLevel  Int       // 9-12
+  prerequisites String? // JSON array of course IDs
+  syllabus    String?   // Course syllabus URL or content
+  thumbnail   String?   // Course thumbnail image
+  
+  // Course settings
+  isActive    Boolean   @default(true)
+  maxStudents Int?      // Maximum enrollment
+  startDate   DateTime?
+  endDate     DateTime?
+  
+  // Pricing
+  price       Float     @default(250.0) // Price per credit
+  isFree      Boolean   @default(false)
+  
+  // Proctoring settings
+  requiresProctoring Boolean @default(false)
+  proctoringType String? // "online", "in_person", "hybrid"
+  
+  // Course content
+  totalHours  Int?      // Estimated total hours
+  difficulty  String?   // "beginner", "intermediate", "advanced"
+  
+  // Relationships
+  modules     Module[]
+  enrollments Enrollment[]
+  assignments Assignment[]
+  teachers    CourseTeacher[]
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([subject])
+  @@index([gradeLevel])
+  @@index([isActive])
+}
+
+model CourseTeacher {
+  id        String   @id @default(cuid())
+  courseId  String
+  course    Course   @relation(fields: [courseId], references: [id])
+  teacherId String
+  teacher   User     @relation(fields: [teacherId], references: [id])
+  role      String   @default("instructor") // "instructor", "assistant", "grader"
+  
+  @@unique([courseId, teacherId])
+  @@index([teacherId])
+}
+
+model Module {
+  id          String    @id @default(cuid())
+  courseId    String
+  course      Course    @relation(fields: [courseId], references: [id])
+  title       String
+  description String?
+  order       Int
+  duration    Int?      // Estimated hours
+  
+  // Module settings
+  isActive    Boolean   @default(true)
+  releaseDate DateTime?
+  
+  lessons     Lesson[]
+  assignments Assignment[]
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([courseId, order])
+}
+
+model Lesson {
+  id          String    @id @default(cuid())
+  moduleId    String
+  module      Module    @relation(fields: [moduleId], references: [id])
+  title       String
+  content     Json      // Rich content with text, videos, interactive elements
+  order       Int
+  duration    Int       // Minutes
+  objectives  String?   // Learning objectives
+  
+  // Lesson settings
+  isActive    Boolean   @default(true)
+  allowSkip   Boolean   @default(false)
+  
+  // Content tracking
+  videoUrl    String?   // Video streaming URL
+  transcript  String?   // Video transcript
+  attachments String?   // JSON array of file URLs
+  
+  progress    Progress[]
+  assignments Assignment[]
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([moduleId, order])
+}
+
+model Assignment {
+  id          String    @id @default(cuid())
+  title       String
+  description String?
+  type        AssignmentType
+  points      Int       @default(100)
+  
+  // Assignment settings
+  dueDate     DateTime?
+  timeLimit   Int?      // Minutes for timed assignments
+  allowLate   Boolean   @default(false)
+  latePenalty Float?    // Percentage penalty for late submissions
+  
+  // Proctoring
+  requiresProctoring Boolean @default(false)
+  proctoringSettings Json?   // Proctoring configuration
+  
+  // Content
+  questions   Json?     // Quiz questions or assignment instructions
+  rubric      Json?     // Grading rubric
+  attachments String?   // JSON array of file URLs
+  
+  // Relationships
+  courseId    String?
+  course      Course?   @relation(fields: [courseId], references: [id])
+  moduleId    String?
+  module      Module?   @relation(fields: [moduleId], references: [id])
+  lessonId    String?
+  lesson      Lesson?   @relation(fields: [lessonId], references: [id])
+  
+  submissions Submission[]
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([courseId])
+  @@index([moduleId])
+  @@index([type])
+}
+
+model Enrollment {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  courseId    String
+  course      Course    @relation(fields: [courseId], references: [id])
+  status      EnrollmentStatus @default(ACTIVE)
+  startDate   DateTime  @default(now())
+  endDate     DateTime?
+  completionDate DateTime?
+  
+  // Academic tracking
+  finalGrade  String?   // A, B, C, D, F
+  gradePoints Float?    // 4.0 scale
+  creditsEarned Int     @default(0)
+  
+  // Payment tracking
+  paymentId   String?
+  payment     Payment?  @relation(fields: [paymentId], references: [id])
+  paymentPlanId String?
+  paymentPlan PaymentPlan? @relation(fields: [paymentPlanId], references: [id])
+  
+  @@unique([userId, courseId])
+  @@index([status])
+  @@index([startDate])
+}
+
+model Progress {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  lessonId    String
+  lesson      Lesson    @relation(fields: [lessonId], references: [id])
+  completed   Boolean   @default(false)
+  score       Float?
+  timeSpent   Int       @default(0) // Seconds
+  lastAccessed DateTime @default(now())
+  completedAt DateTime?
+  
+  @@unique([userId, lessonId])
+  @@index([userId])
+  @@index([completed])
+}
+
+model Submission {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  assignmentId String
+  assignment  Assignment @relation(fields: [assignmentId], references: [id])
+  
+  // Submission details
+  status      SubmissionStatus @default(DRAFT)
+  content     Json?     // Student's submission content
+  attachments String?   // File URLs (comma-separated)
+  submittedAt DateTime?
+  gradedAt    DateTime?
+  
+  // Grading
+  score       Float?
+  maxScore    Float?
+  feedback    String?
+  gradedBy    String?   // Teacher ID
+  
+  // Proctoring
+  proctoringSessionId String?
+  proctoringSession ProctoringSession? @relation(fields: [proctoringSessionId], references: [id])
+  
+  @@unique([userId, assignmentId])
+  @@index([status])
+  @@index([submittedAt])
+}
+
+model Payment {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  
+  // Payment details
+  amount      Float
+  currency    String    @default("USD")
+  status      PaymentStatus @default(PENDING)
+  stripePaymentIntentId String? @unique
+  stripeCustomerId String?
+  
+  // Payment metadata
+  description String?
+  metadata    Json?     // Additional payment data
+  
+  // Relationships
+  enrollments Enrollment[]
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([status])
+  @@index([stripePaymentIntentId])
+}
+
+model PaymentPlan {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  
+  // Plan details
+  type        PaymentPlanType
+  totalAmount Float
+  amountPaid  Float     @default(0)
+  monthlyAmount Float?
+  startDate   DateTime  @default(now())
+  endDate     DateTime?
+  
+  // Stripe integration
+  stripeSubscriptionId String?
+  
+  // Status
+  isActive    Boolean   @default(true)
+  nextPaymentDate DateTime?
+  
+  enrollments Enrollment[]
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([isActive])
+}
+
+model Transcript {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  
+  // Transcript details
+  gpa         Float
+  totalCredits Int
+  graduationDate DateTime?
+  isOfficial  Boolean   @default(false)
+  
+  // Academic record
+  courses     Json      // Array of completed courses with grades
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([isOfficial])
+}
+
+model ChatMessage {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  role        String    // user, assistant
+  content     String
+  context     Json?     // Current lesson, module, course info
+  createdAt   DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model Announcement {
+  id          String    @id @default(cuid())
+  title       String
+  content     String
+  authorId    String
+  author      User      @relation(fields: [authorId], references: [id])
+  
+  // Announcement settings
+  isActive    Boolean   @default(true)
+  priority    String    @default("normal") // low, normal, high, urgent
+  targetAudience String? // all, students, teachers, parents
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([isActive])
+  @@index([priority])
+}
+
+model Message {
+  id          String    @id @default(cuid())
+  senderId    String
+  sender      User      @relation(fields: [senderId], references: [id])
+  recipientId String
+  subject     String?
+  content     String
+  isRead      Boolean   @default(false)
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([senderId])
+  @@index([recipientId])
+  @@index([isRead])
+}
+
+model Todo {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  title       String
+  description String?
+  completed   Boolean   @default(false)
+  priority    String    @default("medium") // low, medium, high
+  dueDate     DateTime?
+  category    String?   // study, assignment, exam, personal
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([completed])
+  @@index([dueDate])
+  @@index([category])
+}
+
+model ProctoringSession {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  
+  // Session details
+  assignmentId String?
+  status      ProctoringStatus @default(NOT_REQUIRED)
+  startTime   DateTime?
+  endTime     DateTime?
+  duration    Int?      // Minutes
+  
+  // Proctoring data
+  sessionData Json?     // Proctoring service data
+  flags       Json?     // Any flags or violations
+  recordingUrl String?  // Session recording URL
+  
+  submissions Submission[]
+  
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  
+  @@index([userId])
+  @@index([status])
+  @@index([startTime])
+}
+
+model Attendance {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  
+  // Attendance details
+  date        DateTime  @default(now())
+  type        String    // "online", "in_person", "absent"
+  duration    Int?      // Minutes attended
+  notes       String?
+  
+  createdAt   DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([date])
+}
+
+model Notification {
+  id          String    @id @default(cuid())
+  userId      String
+  user        User      @relation(fields: [userId], references: [id])
+  
+  // Notification details
+  title       String
+  message     String
+  type        String    // "info", "success", "warning", "error"
+  isRead      Boolean   @default(false)
+  actionUrl   String?   // URL to navigate to when clicked
+  
+  createdAt   DateTime  @default(now())
+  
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+}
